@@ -66,7 +66,7 @@ For local development, expose your dev server with a tunnel such as `ngrok http 
 
 ## 6. Test it
 
-- Success: card `4111 1111 1111 1111`, any future expiry, any CVV.
+- Success: an Indian test card such as Visa `4100 2800 0000 1007` or Mastercard `5500 6700 0000 1002`, any future expiry, any CVV, and any 4–10 digit OTP. An international card such as `4111 1111 1111 1111` fails with `international_transaction_not_allowed` on accounts that accept domestic cards only.
 - Failure: choose the failure option on the test bank page.
 - Dismissal: close the modal and check that your UI recovers.
 

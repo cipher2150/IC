@@ -33,7 +33,9 @@ export const fail = (status: number, description: string) =>
 // Razorpay SDK rejects with { statusCode, error }; pass the real API body through untouched.
 export function errorResponse(e: unknown) {
   if (e && typeof e === "object" && "statusCode" in e && "error" in e) {
-    return NextResponse.json({ error: e.error }, { status: Number(e.statusCode) || 502 });
+    const status = Number(e.statusCode) || 502;
+    // Some API errors (e.g. 404 for an unknown payment id) arrive without an error body.
+    return NextResponse.json({ error: e.error ?? { description: `Razorpay API returned HTTP ${status} with no error details` } }, { status });
   }
   if (e instanceof ConfigError) return fail(500, e.message);
   if (e instanceof SyntaxError) return fail(400, "Request body must be valid JSON");

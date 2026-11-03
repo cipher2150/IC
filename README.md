@@ -2,7 +2,7 @@
 
 A public demo store on Razorpay **test mode** that breaks on purpose. Run a correct payment end to end, then flip a switch to run the same action with a common merchant mistake. You see the real request and response, the root cause and the fix side by side, plus a short troubleshooting doc for each mistake.
 
-**Live:** _add your Vercel URL here_
+**Live:** https://ic-chi-silk.vercel.app
 
 ![60-second demo](docs/demo.gif) <!-- record and add docs/demo.gif -->
 
@@ -63,6 +63,24 @@ proxy.ts                          session cookie + per-IP rate limit
 db/schema.sql                     2 tables, raw SQL, no ORM
 ```
 
+## Test cards
+
+Use these Indian test cards in Razorpay Checkout. No real money moves.
+
+| Card network | Test card number |
+|---|---|
+| Visa | `4100 2800 0000 1007` |
+| Mastercard | `5500 6700 0000 1002` |
+| RuPay | `6527 6589 0000 1005` |
+| Diners | `3608 280009 1007` |
+| Amex | `3402 560004 01007` |
+
+- **Expiry:** any future date, for example `12/28`
+- **CVV:** any random CVV
+- **OTP:** any random 4–10 digit number authenticates successfully
+
+Use domestic (Indian) cards. International cards such as `4111 1111 1111 1111` are rejected with `international_transaction_not_allowed` on accounts that accept domestic cards only. To test scenario #8, close the modal, or choose the failure option on the test bank page.
+
 ## Run it locally
 
 Requirements: Node 20.12 or newer, a Razorpay account in test mode, and a Neon Postgres database.
@@ -70,11 +88,11 @@ Requirements: Node 20.12 or newer, a Razorpay account in test mode, and a Neon P
 1. `npm install`
 2. `cp .env.example .env.local` and fill in:
    - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`: Razorpay dashboard → Test Mode → API Keys.
-   - `RAZORPAY_WEBHOOK_SECRET`: any string. Use the same one when you add the webhook (step 5).
-   - `DATABASE_URL`: the Neon pooled connection string.
-3. Apply the schema: paste `db/schema.sql` into the Neon SQL editor, or run `psql "$DATABASE_URL" -f db/schema.sql`.
-4. `npm run dev`, then open http://localhost:3000. The test card is `4111 1111 1111 1111`, with any future expiry and any CVV.
-5. Webhooks: run `ngrok http 3000`, then in Razorpay (Test Mode) → Webhooks, add `https://<ngrok-host>/api/webhooks/razorpay` with your secret and the events `payment.captured`, `payment.failed`, `payment_link.paid` and `refund.processed`.
+   - `RAZORPAY_WEBHOOK_SECRET`: any string. Use the same value when you add the webhook in Razorpay.
+   - `DATABASE_URL`: the Neon pooled connection string. With the Neon CLI and a linked project, `neon env pull` writes it for you.
+3. Apply the schema: paste `db/schema.sql` into the Neon SQL editor. `psql "$DATABASE_URL_UNPOOLED" -f db/schema.sql` also works, but some networks block the Postgres protocol on port 5432. The app itself connects over HTTPS.
+4. `npm run dev`, then open http://localhost:3000 and pay with a [test card](#test-cards).
+5. Webhooks need a public URL, so Razorpay can't reach `localhost`. Locally, `/api/verify` still marks orders paid. Webhook-driven updates (refunds, Payment Links, failures) work on the deployed site.
 
 Tests: `npm test`. The HMAC and `toPaise` groups always run. The webhook dedupe test runs when `DATABASE_URL` is set.
 
@@ -82,11 +100,13 @@ The Postman collection for the correct flow is at [`public/integration-clinic.po
 
 ## Deploy (Vercel)
 
-1. Import the repo into Vercel and set the four env vars for **Production**.
-2. Register the Razorpay test-mode webhook against the **production** URL. Deployment Protection on preview URLs blocks Razorpay's calls.
+The live site deploys from this GitHub repo. Every push to `main` redeploys.
+
+1. Import the repo at vercel.com/new and set four env vars for **Production**: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` and `DATABASE_URL`.
+2. In Razorpay (Test Mode) → Webhooks, add `https://<your-domain>/api/webhooks/razorpay` with the same secret. Subscribe to these events: `payment.captured`, `payment.failed`, `payment_link.paid` and `refund.processed`. Use the **production** domain, because Deployment Protection on preview URLs blocks Razorpay's calls.
 3. Every Razorpay route sets `export const runtime = 'nodejs'`, because the SDK doesn't run on the Edge runtime.
 
 ## Known limits
 
 - The rate limit (20 POSTs per minute per IP, webhooks exempt) is in-memory per instance. It blunts casual spam, but it isn't shared across serverless instances.
-- The webhook payload field paths follow Razorpay's documented event shapes. Check them against a real delivery stored in `webhook_events.payload`.
+- The payload paths for `payment.captured` and `payment.failed` are checked against real deliveries. Check those for `payment_link.paid` and `refund.processed` against the first real delivery stored in `webhook_events.payload`.

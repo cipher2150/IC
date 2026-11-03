@@ -31,7 +31,9 @@ export function openCheckout(
 
 export async function postJson(url: string, body: unknown) {
   const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  return { ok: res.ok, status: res.status, data: await res.json() };
+  // A non-JSON body (a platform error page, a timeout) must still surface as a message, not a silent rejection.
+  const data = await res.json().catch(() => ({ error: { description: `Unexpected ${res.status} response from ${url}` } }));
+  return { ok: res.ok, status: res.status, data };
 }
 
 export const errorText = (data: { error?: { description?: string } }) => data?.error?.description ?? "Something went wrong";

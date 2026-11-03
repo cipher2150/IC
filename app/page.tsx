@@ -14,7 +14,8 @@ export default function Home() {
           test API: the request, the response, the root cause and the fix.
         </p>
         <p className="mt-2 text-sm text-muted">
-          Test card: <span className="font-mono">4111 1111 1111 1111</span>, any future expiry, any CVV.
+          Test card: <span className="font-mono">4100 2800 0000 1007</span> (Visa), any future expiry, any CVV, and any 4–10 digit
+          OTP. More cards are in the README.
         </p>
       </section>
 

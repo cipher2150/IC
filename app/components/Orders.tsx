@@ -8,12 +8,24 @@ import type { Order } from "@/lib/db";
 export function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState("");
+  const [refunding, setRefunding] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/orders");
-    const data = await res.json();
-    if (res.ok) setOrders(data.orders);
-    else setMessage(errorText(data));
+    setLoading(true);
+    try {
+      const res = await fetch("/api/orders", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setOrders(data.orders);
+        setUpdatedAt(new Date().toLocaleTimeString());
+      } else setMessage(errorText(data));
+    } catch {
+      setMessage("Couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -24,16 +36,25 @@ export function Orders() {
   }, [load]);
 
   async function refund(o: Order) {
+    setRefunding(o.rzp_order_id);
     const r = await postJson("/api/refunds", { rzp_order_id: o.rzp_order_id });
-    setMessage(r.ok ? "Refund requested. Refresh in a few seconds to see refund.processed land." : errorText(r.data));
+    setRefunding(null);
+    setMessage(r.ok ? "Refund requested. The status changes to refunded when Razorpay sends refund.processed." : errorText(r.data));
     ordersChanged();
+    // The webhook usually lands within seconds; check again so the buyer doesn't have to.
+    if (r.ok) setTimeout(load, 5000);
   }
 
   return (
     <section>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Your orders</h2>
-        <button onClick={load} className="rounded border border-line px-3 py-1 text-sm">Refresh</button>
+        <div className="flex items-center gap-3">
+          {updatedAt && <span className="text-xs text-muted" aria-live="polite">Updated {updatedAt}</span>}
+          <button onClick={load} disabled={loading} className="rounded border border-line px-3 py-1 text-sm disabled:opacity-50">
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </div>
       <p className="mt-1 text-sm text-muted">Scoped to this browser&apos;s session cookie. Other visitors can&apos;t see or change them.</p>
       {message && <p className="mt-2 text-sm" role="status">{message}</p>}
@@ -62,7 +83,13 @@ export function Orders() {
                   <td className="py-2 pr-4 tabular-nums">{o.fulfilment_count}×</td>
                   <td className="py-2">
                     {o.status === "paid" && isRealPayment(o.rzp_payment_id) && (
-                      <button onClick={() => refund(o)} className="rounded border border-line px-2 py-1 text-xs">Refund</button>
+                      <button
+                        onClick={() => refund(o)}
+                        disabled={refunding === o.rzp_order_id}
+                        className="rounded border border-line px-2 py-1 text-xs disabled:opacity-50"
+                      >
+                        {refunding === o.rzp_order_id ? "Refunding…" : "Refund"}
+                      </button>
                     )}
                   </td>
                 </tr>

@@ -29,7 +29,8 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    return NextResponse.json({ orders: await listOrders(sessionOf(req)) });
+    // Per-visitor data: never let a browser or CDN reuse it.
+    return NextResponse.json({ orders: await listOrders(sessionOf(req)) }, { headers: { "cache-control": "private, no-store" } });
   } catch (e) {
     return errorResponse(e);
   }
