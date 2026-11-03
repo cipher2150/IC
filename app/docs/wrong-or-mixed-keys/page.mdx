@@ -1,0 +1,75 @@
+export const metadata = { title: "Wrong or mixed keys · Integration Clinic" };
+
+# Wrong or mixed keys
+
+## Symptom
+
+Every API call fails with `401` and `Authentication failed`.
+
+The real response from the API, captured 2026-11-03. A wrong secret and a placeholder `rzp_live_` key return the same thing:
+
+```json
+HTTP 401
+{
+  "error": {
+    "code": "BAD_REQUEST_ERROR",
+    "description": "Authentication failed"
+  }
+}
+```
+
+The body doesn't say which half of the pair is wrong, or whether the mode is mixed. You have to check that yourself.
+
+## Who hits it
+
+New setups, deployments right after a key rotation, and projects whose env vars were copied from somewhere else: another app, another account, or a tutorial.
+
+## Root cause
+
+The API authenticates each request with HTTP Basic auth using `key_id:key_secret`. If the two don't belong together, every request is rejected. Common causes:
+
+- a secret from a different account or mode;
+- a placeholder `rzp_live_…` key id left over from sample code;
+- a typo, or a trailing space or newline from copy-paste;
+- test and live keys mixed. They are separate pairs, and a test secret never works with a live key id.
+
+## How to diagnose
+
+- Check the key id prefix: `rzp_test_` for test mode, `rzp_live_` for live. It should match the mode you're using in the dashboard.
+- Check that the deployed environment actually has the variable. On Vercel, Production and Preview have separate env vars.
+- Check for whitespace around the values.
+- Test the pair from a terminal without pasting the secret into your shell history:
+
+```bash
+curl -s -u "$RAZORPAY_KEY_ID:$RAZORPAY_KEY_SECRET" "https://api.razorpay.com/v1/orders?count=1"
+```
+
+If you're unsure about the secret, regenerate the key. The secret is only shown once.
+
+## Fix
+
+Keep keys in env vars, and guard before the first API call so a bad pair fails loudly with a clear message, not as a 401 in front of a buyer:
+
+```ts
+export function assertKeys() {
+  const key_id = process.env.RAZORPAY_KEY_ID ?? "";
+  const key_secret = process.env.RAZORPAY_KEY_SECRET ?? "";
+  if (!key_id.startsWith("rzp_test_")) throw new ConfigError("RAZORPAY_KEY_ID must be a test-mode key");
+  if (!key_secret) throw new ConfigError("RAZORPAY_KEY_SECRET is not set");
+  return { key_id, key_secret };
+}
+```
+
+In production, the expected prefix is `rzp_live_`. Derive it from the environment rather than hard-coding one value everywhere.
+
+## Prevention
+
+- Never commit keys. Keep a `.env.example` with empty values.
+- Send the key id to the browser from the server (in the order response), so there's one source of truth for it.
+- Never log the secret, including inside error objects.
+- Rotate immediately if a secret leaks.
+
+## Related
+
+- [Try it live](/scenarios/wrong-or-mixed-keys)
+- [Go-live checklist](/docs/go-live-checklist)

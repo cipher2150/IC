@@ -1,0 +1,48 @@
+export const metadata = { title: "Parsing JSON before verifying the webhook · Integration Clinic" };
+
+# Parsing JSON before verifying the webhook
+
+## Symptom
+
+Webhook signature verification fails, even though the webhook secret is definitely right. Razorpay sees your endpoint rejecting deliveries and keeps retrying.
+
+## Who hits it
+
+Handlers that parse the body first (`await req.json()`, Express's `express.json()`, a framework body parser) and then compute the HMAC over `JSON.stringify(body)`.
+
+## Root cause
+
+`X-Razorpay-Signature` is an HMAC-SHA256 of the **exact bytes** Razorpay sent. Parsing and re-serialising rebuilds the JSON, and the result can differ in whitespace, key order, number formatting or escaping (`₹` versus `₹`, `\/` versus `/`). One different byte gives a completely different HMAC.
+
+In this demo, the replayed event is pretty-printed, so the re-serialised body always differs. With real deliveries the difference may or may not appear for a given payload. That's worse, because the bug comes and goes.
+
+## How to diagnose
+
+- Log the length of the raw body and of your re-serialised string. If they differ, this is the cause.
+- Confirm you're using the **webhook secret** you set in the dashboard, not the API key secret. That's the other common cause of this symptom.
+- Verify a recorded raw body by hand with the secret, outside your framework.
+
+## Fix
+
+Read the body once as text, verify that string, then parse it:
+
+```ts
+const raw = await req.text(); // the exact bytes Razorpay signed
+if (!verifySignature(raw, req.headers.get("x-razorpay-signature") ?? "", WEBHOOK_SECRET)) {
+  return fail(400, "Invalid webhook signature");
+}
+const event = JSON.parse(raw);
+```
+
+Next.js App Router route handlers don't parse the body for you, so `req.text()` is enough. In Express, mount `express.raw({ type: "application/json" })` on the webhook route only.
+
+## Prevention
+
+- Keep one `verifySignature` function and use it everywhere, with a constant-time compare.
+- Add a test that verifies a recorded raw body exactly as received.
+- Never "fix" this by skipping verification. Unsigned webhooks let anyone mark orders paid.
+
+## Related
+
+- [Try it live](/scenarios/parse-before-verify)
+- [Non-idempotent webhook](/docs/non-idempotent-webhook)

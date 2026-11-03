@@ -1,0 +1,70 @@
+{
+  "info": {
+    "name": "Integration Clinic: correct flow",
+    "description": "The correct Razorpay test-mode flow against the Integration Clinic demo. Set baseUrl to your deployment or http://localhost:3000. The first request sets an ic_session cookie, and Postman's cookie jar sends it on later requests, so all orders stay in one demo session.\n\nTo verify a real payment, finish Checkout in a browser, then either copy that tab's ic_session cookie into Postman's cookie jar or use 'Copy as cURL' on the scenario page.\n\nUnofficial demo, not affiliated with Razorpay.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "orderId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Create order",
+      "event": [
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('orderId', pm.response.json().order_id);"] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "description": "Send only the sku. The server owns the price and converts it to paise.",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/orders",
+        "body": { "mode": "raw", "raw": "{\n  \"sku\": \"ebook\"\n}" }
+      }
+    },
+    {
+      "name": "2. Verify payment",
+      "request": {
+        "method": "POST",
+        "description": "Paste the three values the Checkout handler returns. The server checks the HMAC with the key secret, then fetches the payment and checks status, order and amount.",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/verify",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"razorpay_order_id\": \"{{orderId}}\",\n  \"razorpay_payment_id\": \"pay_… from the Checkout handler\",\n  \"razorpay_signature\": \"… from the Checkout handler\"\n}"
+        }
+      }
+    },
+    {
+      "name": "3. List orders",
+      "request": {
+        "method": "GET",
+        "description": "All orders in this session, newest first, with status and fulfilment_count.",
+        "url": "{{baseUrl}}/api/orders"
+      }
+    },
+    {
+      "name": "4. Create payment link",
+      "request": {
+        "method": "POST",
+        "description": "Returns a short_url. When it's paid, the payment_link.paid webhook marks the order paid.",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/payment-links",
+        "body": { "mode": "raw", "raw": "{\n  \"sku\": \"cheatsheet\"\n}" }
+      }
+    },
+    {
+      "name": "5. Refund",
+      "request": {
+        "method": "POST",
+        "description": "Full refund of a paid order. Add \"amount\" (paise) for a partial refund. Status flips to refunded when refund.processed arrives.",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/refunds",
+        "body": { "mode": "raw", "raw": "{\n  \"rzp_order_id\": \"{{orderId}}\"\n}" }
+      }
+    }
+  ]
+}

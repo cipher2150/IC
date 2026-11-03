@@ -1,0 +1,55 @@
+export const metadata = { title: "Skipping server-side verification · Integration Clinic" };
+
+# Skipping server-side verification
+
+## Symptom
+
+Orders are marked paid, but the Razorpay dashboard has no matching captured payment. Fetching the stored payment id fails, because the payment doesn't exist.
+
+## Who hits it
+
+Integrations that treat the Checkout `handler` callback as proof of payment, and "confirm" endpoints that copy the ids from the browser straight into the database.
+
+## Root cause
+
+The `handler` runs in the buyer's browser. Its three values (`razorpay_order_id`, `razorpay_payment_id` and `razorpay_signature`) reach your server like any other request body, and anyone can send any values. If the server doesn't check them, a request with a made-up payment id marks the order paid, and fulfilment runs.
+
+## How to diagnose
+
+- For a suspicious order, call `payments.fetch(payment_id)`. A fake id returns an error. A real one tells you its status, order and amount.
+- Compare orders marked paid with captured payments over the same period. Every paid order should have one.
+- In this demo, the broken route marks the order paid with a `pay_FAKE…` id and the fulfilment counter goes up.
+
+## Fix
+
+Two checks, both on the server.
+
+**1. The signature.** Razorpay signs `order_id|payment_id` with your **key secret** (not the webhook secret). Recompute it and compare in constant time:
+
+```ts
+const expected = Buffer.from(createHmac("sha256", KEY_SECRET).update(`${orderId}|${paymentId}`).digest("hex"), "hex");
+const given = Buffer.from(signature, "hex");
+// timingSafeEqual throws on unequal lengths, so compare lengths first.
+const valid = given.length === expected.length && timingSafeEqual(given, expected);
+```
+
+**2. The payment itself.** A valid signature proves Checkout produced these ids. It doesn't prove the money arrived, so fetch the payment:
+
+```ts
+const payment = await razorpay.payments.fetch(paymentId);
+if (payment.order_id !== orderId || payment.amount !== order.amount_paise) reject();
+if (payment.status === "authorized") return pending(); // not captured yet: let the webhook finish it
+if (payment.status !== "captured") reject();
+```
+
+## Prevention
+
+- Make the `payment.captured` webhook the source of truth, and use `/verify` only for fast feedback to the buyer.
+- Make status changes forward-only (created → paid → refunded), so `/verify` and the webhook can arrive in either order without undoing each other.
+- Never fulfil on the browser's word alone.
+
+## Related
+
+- [Try it live](/scenarios/skipping-server-verification)
+- [Non-idempotent webhook](/docs/non-idempotent-webhook)
+- [Checkout in 10 minutes](/docs/checkout-in-10-minutes)

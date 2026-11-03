@@ -1,0 +1,46 @@
+export const metadata = { title: "Trusting the client for the price · Integration Clinic" };
+
+# Trusting the client for the price
+
+## Symptom
+
+An order's amount doesn't match the catalog price for its item. In the worst case, a ₹999 item sells for ₹1 and everything downstream looks legitimate.
+
+## Who hits it
+
+Order endpoints that accept `{ sku, amount }` or `{ items, total }` from the browser, usually because the cart page already knows the total.
+
+## Root cause
+
+Every field in a request can be edited: with DevTools' "Edit and resend", with cURL, or with an intercepting proxy. If the server creates the Razorpay order from the client's amount, the client sets the price.
+
+Signature verification won't catch this. The order is real, just at the wrong amount, so Checkout, the HMAC and `payments.fetch` all agree with each other.
+
+## How to diagnose
+
+- Compare each order's amount with the catalog price for its sku.
+- Look for amounts that aren't in your price list, especially very small ones.
+- In the browser's Network tab, check whether the order request body carries an `amount` or `total`. If it does, the server is probably reading it.
+
+## Fix
+
+The client sends only what it's choosing. The server decides what it costs:
+
+```ts
+const { sku } = await req.json(); // any amount in the body is ignored
+const item = getItem(sku);
+if (!item) return fail(400, "Unknown sku");
+await razorpay.orders.create({ amount: toPaise(item.priceRupees), currency: "INR" });
+```
+
+## Prevention
+
+- Compute totals, discounts and coupons on the server, from your own data.
+- Reject unknown skus rather than defaulting to something.
+- At verification, compare the payment amount with the amount *you* stored for the order.
+
+## Related
+
+- [Try it live](/scenarios/trusting-the-client-for-price)
+- [Rupees instead of paise](/docs/rupees-vs-paise)
+- [Skipping server-side verification](/docs/skipping-server-verification)

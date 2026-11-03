@@ -1,0 +1,51 @@
+export const metadata = { title: "Order stuck after the modal closes · Integration Clinic" };
+
+# Order stuck after the modal closes
+
+## Symptom
+
+After the buyer closes Checkout, the page spins on "Waiting for payment…" forever. In the database, orders pile up in `created` with no payment.
+
+## Who hits it
+
+Integrations that pass only a `handler` to Checkout.
+
+## Root cause
+
+Checkout calls `handler` only when a payment succeeds. Closing the modal calls `modal.ondismiss`. A failed attempt fires a `payment.failed` event on the Checkout instance, and the modal stays open so the buyer can try again. If you handle neither, the page never finds out that the buyer gave up or failed, and nothing moves the order out of `created`.
+
+## How to diagnose
+
+- Close the modal yourself. If the UI doesn't change, `ondismiss` isn't handled.
+- In test mode, choose the failure option on the test bank page. If nothing happens on your page, `payment.failed` isn't handled.
+- Look for `created` orders that have failed payment attempts against them in the dashboard.
+
+## Fix
+
+Handle every outcome in the browser:
+
+```ts
+const rzp = new Razorpay({
+  key, order_id, amount,
+  handler: verify,
+  modal: { ondismiss: () => setStatus("Checkout closed. Buy again to resume the same order.") },
+});
+rzp.on("payment.failed", (r) => setStatus(`Payment failed: ${r.error.description}`));
+rzp.open();
+```
+
+On the server:
+
+- Mark the order `failed` from the `payment.failed` webhook. The browser may already be gone.
+- When the same session buys the same item again, reuse the open order instead of creating a new one. Razorpay allows more payment attempts on the same order.
+
+## Prevention
+
+- Treat success, failure and dismissal as three explicit UI states.
+- Don't leave a buy button disabled on the assumption that a callback will fire.
+- Report on stale `created` orders, rather than letting them accumulate silently.
+
+## Related
+
+- [Try it live](/scenarios/modal-dismissed)
+- [Checkout in 10 minutes](/docs/checkout-in-10-minutes)

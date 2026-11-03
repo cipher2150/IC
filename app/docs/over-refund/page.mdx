@@ -1,0 +1,50 @@
+export const metadata = { title: "Refunding more than was captured · Integration Clinic" };
+
+# Refunding more than was captured
+
+## Symptom
+
+`payments.refund` returns a `400` saying the refund amount is more than the payment's refundable amount.
+
+{/* TODO(capture): paste the real 400 body from POST /api/broken/refund against a captured test payment. */}
+
+## Who hits it
+
+Support tools and admin dashboards with a free-text refund amount, flows that issue several partial refunds, and code that mixes rupees and paise. Running an amount that's already in paise through `toPaise` again asks for 100 times too much: the mirror image of the [rupees-vs-paise](/docs/rupees-vs-paise) bug.
+
+## Root cause
+
+The refund amount is in paise, and it has to be at most the captured amount minus anything already refunded. The API enforces this, but if your code doesn't check first, the operator sees a raw API error. Worse, your own records may already say "refunded".
+
+## How to diagnose
+
+- Fetch the payment and compare its `amount` and `amount_refunded` with the amount you tried to refund.
+- Check the unit. If the attempted amount is exactly 100 times too large, it went through `toPaise` twice.
+- Check for an earlier partial refund on the same payment.
+
+## Fix
+
+Validate before calling the API, and say clearly what's allowed:
+
+```ts
+if (order.status !== "paid") return fail(400, "Only paid orders can be refunded");
+if (!Number.isInteger(amount) || amount < 1 || amount > order.amount_paise) {
+  return fail(400, `Refund must be between 1 and ${order.amount_paise} paise`);
+}
+await razorpay.payments.refund(order.rzp_payment_id, { amount });
+```
+
+For partial refunds, use the payment's `amount - amount_refunded` as the upper bound, not the original amount.
+
+Don't mark the order refunded when the call returns. Do it when the `refund.processed` webhook arrives.
+
+## Prevention
+
+- Show the operator the refundable amount next to the input.
+- Use the same `toPaise` helper for refunds as for orders.
+- Disable the refund button while a request is in flight, so a double-click can't send two refunds.
+
+## Related
+
+- [Try it live](/scenarios/over-refund) (needs a real paid test order first)
+- [Rupees instead of paise](/docs/rupees-vs-paise)

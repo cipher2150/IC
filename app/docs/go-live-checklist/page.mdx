@@ -1,0 +1,42 @@
+export const metadata = { title: "Go-live checklist · Integration Clinic" };
+
+# Go-live checklist
+
+Work through this before switching an integration from test mode to live. Each item links to the page that explains it.
+
+## Keys
+
+- Live keys are generated in **Live Mode** in the dashboard, which needs an activated account.
+- Keys are only in env vars for the production environment, and test keys stay in development and preview. See [wrong or mixed keys](/docs/wrong-or-mixed-keys).
+- A guard checks the key prefix (`rzp_live_` in production) before the first API call.
+- Secrets never appear in client bundles, logs or error messages.
+
+## Orders and amounts
+
+- The server computes every amount from its own catalog. The client sends only ids. See [trusting the client](/docs/trusting-the-client-for-price).
+- Every amount goes through one `toPaise` helper, which is unit-tested. See [rupees vs paise](/docs/rupees-vs-paise).
+- Duplicate clicks reuse the open order instead of creating a new one.
+- Order creation is rate-limited per IP.
+
+## Verification
+
+- `/verify` checks the HMAC with the key secret, in constant time, and then fetches the payment to confirm status, order and amount. See [skipping verification](/docs/skipping-server-verification).
+- Nothing is fulfilled on the browser's word alone.
+
+## Webhooks
+
+- A separate webhook is registered for live mode, with its own secret. Test and live webhooks are configured separately.
+- The webhook URL is public HTTPS, with no auth wall or deployment protection in front of it.
+- The handler verifies the raw body, not re-serialised JSON. See [parse before verify](/docs/parse-before-verify).
+- Events are deduped on `X-Razorpay-Event-Id`, duplicates return 200, and status only moves forward. See [non-idempotent webhook](/docs/non-idempotent-webhook).
+- The handler responds quickly and leaves slow work for later.
+
+## Failure paths
+
+- `ondismiss` and `payment.failed` are handled in the browser, and `payment.failed` is handled in the webhook. See [modal dismissed](/docs/modal-dismissed).
+- Refund amounts are validated against the refundable amount, and refunded status comes from `refund.processed`. See [over-refund](/docs/over-refund).
+
+## Before you announce it
+
+- Make one small real payment in live mode, see it marked paid by the webhook, and refund it.
+- Check that reconciliation works: every paid order has a captured payment, and every captured payment has an order.

@@ -1,0 +1,65 @@
+export const metadata = { title: "Rupees instead of paise · Integration Clinic" };
+
+# Rupees instead of paise
+
+## Symptom
+
+Checkout opens showing **₹4.99** for an item you sell at ₹499. Or `orders.create` returns a `400` when the amount has a decimal point, such as `499.5`.
+
+The real response from the test API for `amount: 499.5`, captured 2026-11-03:
+
+```json
+HTTP 400
+{
+  "error": {
+    "code": "BAD_REQUEST_ERROR",
+    "description": "The amount must be an integer.",
+    "metadata": {},
+    "reason": "input_validation_failed",
+    "source": "business",
+    "step": "payment_initiation"
+  }
+}
+```
+
+The `amount: 499` call gets no error at all: it returns `200` with `"amount": 499`. That silent success is the dangerous half of this bug.
+
+## Who hits it
+
+Anyone who passes a catalog price straight into the Orders API, especially when prices are stored in rupees in a database, CMS or spreadsheet.
+
+## Root cause
+
+Razorpay amounts are always in the smallest currency unit. For INR that's paise: `amount: 499` means 499 paise, which is ₹4.99. The API accepts it without complaint, because ₹4.99 is a perfectly valid amount. A value like `499.5` can't be a whole number of paise, so the API rejects it.
+
+## How to diagnose
+
+- **Checkout:** the amount in the modal is a hundredth of your price.
+- **API response:** the `amount` in the `orders.create` response is exactly the number you sent. If it equals your rupee price, you sent rupees.
+- **Dashboard:** the order appears at the wrong amount.
+- **Logs:** log the amount you send next to the catalog price, so a mismatch is one glance away. Never log the key secret.
+
+## Fix
+
+Convert in exactly one place, on the server:
+
+```ts
+export const toPaise = (rupees: number) => Math.round(rupees * 100);
+
+await razorpay.orders.create({ amount: toPaise(item.priceRupees), currency: "INR" });
+```
+
+`Math.round` is not optional. With floating-point maths, `19.99 * 100` is `1998.9999999999998` and `0.1 + 0.2` is `0.30000000000000004`. Rounding gives 1999 and 30.
+
+## Prevention
+
+- Store prices as integer paise if you can, and convert to rupees only for display.
+- Put the unit in the name: `amount_paise`, `priceRupees`.
+- Unit-test `toPaise` with float-unfriendly values like `19.99` and `0.1 + 0.2`.
+- Before opening Checkout, compare the order amount with the catalog price.
+
+## Related
+
+- [Try it live](/scenarios/rupees-vs-paise)
+- [Trusting the client for the price](/docs/trusting-the-client-for-price)
+- [Go-live checklist](/docs/go-live-checklist)

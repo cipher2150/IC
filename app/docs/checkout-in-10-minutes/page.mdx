@@ -1,0 +1,73 @@
+export const metadata = { title: "Checkout in 10 minutes · Integration Clinic" };
+
+# Checkout in 10 minutes
+
+The shortest correct Razorpay Checkout integration, in test mode. Every step links to the file in this repo that does it.
+
+## 1. Get test keys
+
+In the Razorpay dashboard, switch to **Test Mode** and generate an API key. Put both halves in env vars. Never put them in code:
+
+```bash
+RAZORPAY_KEY_ID=rzp_test_…
+RAZORPAY_KEY_SECRET=…
+```
+
+## 2. Create the order on the server
+
+The browser sends only what the buyer chose. The server owns the price and converts it to paise once (`app/api/orders/route.ts`):
+
+```ts
+const { sku } = await req.json();
+const item = getItem(sku);
+const order = await razorpay.orders.create({ amount: toPaise(item.priceRupees), currency: "INR" });
+return Response.json({ order_id: order.id, amount: order.amount, currency: "INR", key_id: process.env.RAZORPAY_KEY_ID });
+```
+
+## 3. Open Checkout in the browser
+
+Load `https://checkout.razorpay.com/v1/checkout.js` once, then (`lib/checkout.ts`):
+
+```ts
+const rzp = new Razorpay({
+  key: order.key_id,
+  order_id: order.order_id,
+  amount: order.amount,
+  currency: order.currency,
+  handler: (r) => fetch("/api/verify", { method: "POST", body: JSON.stringify(r) }),
+  modal: { ondismiss: () => showRetry() },
+});
+rzp.on("payment.failed", (r) => showError(r.error.description));
+rzp.open();
+```
+
+## 4. Verify on the server
+
+Check the signature with your key secret, then confirm the payment with the API (`app/api/verify/route.ts`):
+
+```ts
+verifySignature(`${order_id}|${payment_id}`, signature, KEY_SECRET); // constant-time
+const payment = await razorpay.payments.fetch(payment_id);
+// payment.status === "captured", payment.order_id and payment.amount match the order
+```
+
+## 5. Add the webhook
+
+In the dashboard (still in Test Mode), add a webhook pointing at `https://<your-host>/api/webhooks/razorpay`, choose a secret, and subscribe to `payment.captured`, `payment.failed` and `refund.processed`. The handler (`app/api/webhooks/razorpay/route.ts`):
+
+1. reads the raw body with `await req.text()`;
+2. verifies `X-Razorpay-Signature` with the **webhook** secret;
+3. records `X-Razorpay-Event-Id` under a unique key and returns 200 for duplicates;
+4. moves the order forward (created → paid) exactly once.
+
+The webhook is the source of truth. Step 4 just gives the buyer an answer quickly.
+
+For local development, expose your dev server with a tunnel such as `ngrok http 3000` and register the tunnel URL.
+
+## 6. Test it
+
+- Success: card `4111 1111 1111 1111`, any future expiry, any CVV.
+- Failure: choose the failure option on the test bank page.
+- Dismissal: close the modal and check that your UI recovers.
+
+Then work through the [troubleshooting pages](/docs) and the [go-live checklist](/docs/go-live-checklist).

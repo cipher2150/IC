@@ -1,0 +1,50 @@
+export const metadata = { title: "Non-idempotent webhook · Integration Clinic" };
+
+# Non-idempotent webhook
+
+## Symptom
+
+One purchase, two fulfilments: two confirmation emails, stock decremented twice, or, in this demo, `fulfilment_count = 2`.
+
+## Who hits it
+
+Any webhook handler that acts on every delivery it receives.
+
+## Root cause
+
+Webhooks are delivered **at least once**. Razorpay retries when your endpoint doesn't return a 2xx in time, network failures cause redeliveries, and you might replay an event yourself while debugging. Separately, more than one event can describe the same payment, for example `payment.captured` and `order.paid`. A handler that does the work on every delivery does it twice.
+
+## How to diagnose
+
+- Log the `X-Razorpay-Event-Id` header of every delivery and look for repeats.
+- Count fulfilments per order. Anything above one is this bug.
+- Look at what your endpoint returns. Slow or non-2xx responses cause retries, and retries surface the bug.
+
+## Fix
+
+Record each event id under a unique key before acting on it, and skip events you've already seen:
+
+```ts
+const inserted = await sql`
+  INSERT INTO webhook_events (event_id, type, payload) VALUES (${eventId}, ${event.event}, ${raw})
+  ON CONFLICT (event_id) DO NOTHING RETURNING event_id`;
+if (inserted.length === 0) return Response.json({ status: "duplicate" }); // still a 200
+```
+
+Three details matter:
+
+- **Return 200 for duplicates.** A 4xx tells Razorpay to retry, which brings the duplicate back again.
+- **Make the state change idempotent too.** Only move status forward (`created → paid`, never back), and attach the fulfilment to that transition. Then `payment.captured`, `order.paid` and `/verify` can all arrive and the order is still fulfilled once.
+- **Don't swallow failures.** If applying the event throws, delete the recorded event id and return a 5xx, so Razorpay's retry gets through instead of being deduped forever.
+
+## Prevention
+
+- Treat every webhook handler as "may run more than once" from day one.
+- Respond quickly. Record the event, do the minimum, and leave slow work for later.
+- Test it: post the same signed event twice and assert one fulfilment. This repo's test suite does exactly that.
+
+## Related
+
+- [Try it live](/scenarios/non-idempotent-webhook)
+- [Parsing JSON before verifying the webhook](/docs/parse-before-verify)
+- [Skipping server-side verification](/docs/skipping-server-verification)
